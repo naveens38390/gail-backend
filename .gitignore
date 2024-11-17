@@ -10,6 +10,7 @@ local_settings.py
 .env
 *.dump
 *dump*
+test_files/
 
 # Django #
 *.log

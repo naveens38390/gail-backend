@@ -1,0 +1,14 @@
+# GAIL - STOCK POINT LOCATION, EX WORK LOCATION, POLYMER PRICE SHEET EXTRACTER AND SERVER
+
+## Installation
+
+1. `git `
+
+2. ``
+
+3. ``
+
+4. ``
+
+
+
