@@ -1,0 +1,13 @@
+[Unit]
+Description=uWSGI instance to serve gail restful backend
+After=network.target
+
+[Service]
+User=ubuntu
+Group=www-data
+WorkingDirectory=/home/ubuntu/gail-backend
+Environment="PATH=/home/ubuntu/gail-backend/env/bin"
+ExecStart=/home/ubuntu/gail-backend/env/bin/uwsgi --ini /home/ubuntu/gail-backend/gail-backend.ini
+
+[Install]
+WantedBy=multi-user.target
