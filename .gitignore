@@ -11,6 +11,7 @@ local_settings.py
 *.dump
 *dump*
 test_files/
+vishnu_help_jainam/
 
 # Django #
 *.log
