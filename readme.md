@@ -1,6 +1,7 @@
 # GAIL - STOCK POINT LOCATION, EX WORK LOCATION, POLYMER PRICE SHEET EXTRACTER AND SERVER
 
 ## Installation
+!> Note: Install JDK and ghostscript `sudo apt install -y default-jdk && sudo apt install -y ghostscript`
 
 1. `git clone git@github.com:beingtharur/gail-backend.git`
 

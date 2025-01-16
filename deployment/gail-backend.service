@@ -6,7 +6,7 @@ After=network.target
 User=ubuntu
 Group=www-data
 WorkingDirectory=/home/ubuntu/gail-backend
-Environment="PATH=/home/ubuntu/gail-backend/env/bin"
+Environment="PATH=/home/ubuntu/gail-backend/env/bin:/home/ubuntu/gail-backend/env/bin:/usr/lib/jvm/java-21-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
 ExecStart=/home/ubuntu/gail-backend/env/bin/uwsgi --ini /home/ubuntu/gail-backend/gail-backend.ini
 
 [Install]
