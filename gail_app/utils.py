@@ -1,4 +1,3 @@
-# utils.py
 import json
 import tabula  # Correct import for tabula-py
 import camelot
@@ -6,12 +5,14 @@ import pandas as pd
 from pprint import pprint
 from Levenshtein import ratio
 from collections import defaultdict
+import os
 
 
 FILE_TYPE_MAPPING = {
     "stock_point_file": "STOCK POINT FILE",
     "freight_file": "FREIGHT FILE",
-    "ex_work_file": "EX WORK FILE"
+    "ex_work_file": "EX WORK FILE",
+    "competitor_file": "CROSS REFERENC FILE"
 }
 
 MONTH_MAPPING = {
@@ -28,7 +29,6 @@ MONTH_MAPPING = {
     "november"   : "november",
     "december"   : "december"
 }
-
 
 
 def word_similarity(word1, word2):
@@ -79,21 +79,233 @@ def clean_header(row):
     print("row (clean_header): ", row)
 
     for col in row:
-        if col.strip():  # Ignore empty strings
+        col_str = str(col).strip()
+        if col_str and col_str != 'nan':  # Ignore empty strings and NaN values
             # Check if predefined headers exist in the string and add them individually
-            if any(header in col for header in predefined_headers):
+            if any(header in col_str for header in predefined_headers):
                 for header in predefined_headers:
-                    if max([word_similarity(header, col_word) for col_word in ordered_combinations(col.split(" "))]) > 0.8:
+                    if max([word_similarity(header, col_word) for col_word in ordered_combinations(col_str.split(" "))]) > 0.8:
                         cleaned_row.append(header)
             else:
-                cleaned_row.append(col.strip())  # Add other valid elements
+                cleaned_row.append(col_str)  # Add other valid elements
     return cleaned_row
 
 
+def detect_file_format(file_path):
+    """
+    Detect the format of the uploaded file based on extension.
+    """
+    _, ext = os.path.splitext(file_path.lower())
+    if ext in ['.xlsx', '.xls']:
+        return 'excel'
+    elif ext == '.csv':
+        return 'csv'
+    else:
+        return 'unknown'
+
+
+def extract_cross_reference(file_path):
+    """
+    Extract cross-reference data from Excel/CSV files.
+    Fixed to handle the exact structure of your Excel file.
+    
+    Args:
+        file_path (str): Path to the Excel/CSV file.
+    
+    Returns:
+        dict: Dictionary containing cross-reference mappings and metadata.
+    """
+    print(f"=== EXTRACTING CROSS-REFERENCE DATA ===")
+    print(f"File path: {file_path}")
+    
+    try:
+        file_format = detect_file_format(file_path)
+        print(f"File format: {file_format}")
+        
+        if file_format == 'excel':
+            df = pd.read_excel(file_path)
+        elif file_format == 'csv':
+            df = pd.read_csv(file_path)
+        else:
+            return {"error": f"Unsupported file format: {file_format}"}
+        
+        print(f"File loaded successfully. Shape: {df.shape}")
+        print(f"Original columns: {df.columns.tolist()}")
+        
+        # Clean column names and remove extra spaces
+        df.columns = df.columns.astype(str).str.strip()
+        print(f"Cleaned columns: {df.columns.tolist()}")
+        
+        # Remove completely empty rows
+        df = df.dropna(how='all')
+        print(f"After removing empty rows - Shape: {df.shape}")
+        
+        cross_reference_data = {
+            "companies": [],
+            "mappings": {},
+            "metadata": {
+                "total_companies": 0,
+                "total_mappings": 0,
+                "file_format": file_format
+            }
+        }
+        
+        if df.empty or len(df.columns) < 5:
+            print(f"❌ Not enough columns or empty DataFrame")
+            return cross_reference_data
+        
+        # Based on your actual Excel structure:
+        # Column 0: Polymer Type (HDPE, LLDPE, etc.)
+        # Column 1: GAIL Grade (B56A003A, I50A250, etc.) - THIS IS THE KEY
+        # Column 2: Application 
+        # Column 3: Characteristics
+        # Column 4: BCPL
+        # Column 5: RIL  
+        # Column 6: HPL
+        # Column 7: IOCL/IOC
+        # Column 8: OPAL/Opal
+        # Column 9: HMEL
+        # Column 10: Major Imported Grades
+        
+        gail_column = df.columns[1]  # "GAIL Grade" column
+        competitor_columns = df.columns[4:11].tolist()  # Columns 4-10 are the competitors
+        
+        print(f"GAIL column: '{gail_column}'")
+        print(f"Competitor columns: {competitor_columns}")
+        
+        # Clean competitor column names and store them
+        competitor_columns = [col.strip() for col in competitor_columns if col.strip()]
+        cross_reference_data["companies"] = competitor_columns
+        cross_reference_data["metadata"]["total_companies"] = len(competitor_columns)
+        
+        print(f"Processing {len(competitor_columns)} competitor columns...")
+        
+        mappings_count = 0
+        b56_found = False
+        
+        for index, row in df.iterrows():
+            # Get GAIL grade (product code)
+            gail_grade = str(row[gail_column]).strip()
+            
+            # Debug B56A003A specifically
+            if 'B56A003' in gail_grade:
+                print(f"Row {index}: Found B56A003 variant: '{gail_grade}'")
+                b56_found = True
+                
+                # Check all competitor values for this row
+                for comp_col in competitor_columns:
+                    if comp_col in df.columns:
+                        comp_value = str(row[comp_col]).strip() if pd.notna(row[comp_col]) else 'NaN'
+                        print(f"  {comp_col}: '{comp_value}'")
+            
+            # Skip if GAIL grade is empty or invalid
+            if (pd.isna(row[gail_column]) or 
+                not gail_grade or 
+                gail_grade.lower() in ['nan', 'null', '', 'gail grade']):
+                continue
+            
+            if gail_grade not in cross_reference_data["mappings"]:
+                cross_reference_data["mappings"][gail_grade] = {}
+            
+            # Process each competitor column
+            for competitor in competitor_columns:
+                if competitor not in df.columns:
+                    print(f"Warning: Competitor column '{competitor}' not found in DataFrame")
+                    continue
+                    
+                competitor_grade = str(row[competitor]).strip()
+                
+                # Skip if competitor grade is empty, NaN, or "No equivalent"
+                if (pd.isna(row[competitor]) or 
+                    not competitor_grade or 
+                    competitor_grade.lower() in ['nan', 'null', '', 'no equivalent', '(blank)']):
+                    continue
+                
+                # Handle multiple grades with various delimiters
+                competitor_grades = []
+                for delimiter in [',', ';', '|', '\n', '/']:
+                    if delimiter in competitor_grade:
+                        competitor_grades = [grade.strip() for grade in competitor_grade.split(delimiter)]
+                        break
+                else:
+                    competitor_grades = [competitor_grade]
+                
+                # Filter out empty and invalid grades
+                competitor_grades = [
+                    grade for grade in competitor_grades 
+                    if grade and grade.lower() not in ['nan', 'null', '', 'no equivalent', 'n/a', '(blank)']
+                ]
+                
+                if competitor_grades:
+                    cross_reference_data["mappings"][gail_grade][competitor] = competitor_grades
+                    mappings_count += len(competitor_grades)
+        
+        print(f"B56A003A variants found during processing: {b56_found}")
+        print(f"Final mappings for B56A003A: {cross_reference_data['mappings'].get('B56A003A', 'NOT FOUND')}")
+        
+        cross_reference_data["metadata"]["total_mappings"] = mappings_count
+        
+        print(f"=== EXTRACTION RESULTS ===")
+        print(f"- Total grades: {len(cross_reference_data['mappings'])}")
+        print(f"- Total mappings: {mappings_count}")
+        print(f"- Companies: {cross_reference_data['companies']}")
+        
+        # Show sample of mappings
+        sample_grades = list(cross_reference_data['mappings'].keys())[:5]
+        print(f"- Sample grades: {sample_grades}")
+        
+        return cross_reference_data
+        
+    except Exception as e:
+        print(f"❌ Error extracting cross-reference data: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Failed to extract cross-reference data: {str(e)}"}
+    
+def save_cross_reference_to_db(excel_upload_instance):
+    """
+    Save cross-reference data to individual CrossReference model instances.
+    This makes querying much faster and more efficient.
+    """
+    from .models import CrossReference  # Import here to avoid circular imports
+    
+    if not excel_upload_instance.extracted_data or 'mappings' not in excel_upload_instance.extracted_data:
+        return
+    
+    # Clear existing cross-references for this upload
+    CrossReference.objects.filter(excel_upload=excel_upload_instance).delete()
+    
+    # Create new cross-reference entries
+    cross_references = []
+    mappings = excel_upload_instance.extracted_data['mappings']
+    
+    for gail_grade, competitors in mappings.items():
+        for competitor_name, competitor_grades in competitors.items():
+            for competitor_grade in competitor_grades:
+                cross_references.append(
+                    CrossReference(
+                        gail_grade=gail_grade,
+                        competitor_name=competitor_name,
+                        competitor_grade=competitor_grade,
+                        excel_upload=excel_upload_instance
+                    )
+                )
+    
+    # Bulk create for efficiency
+    CrossReference.objects.bulk_create(cross_references, batch_size=1000)
+    print(f"Created {len(cross_references)} cross-reference entries in database.")
+
+
 def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:str=None):
-    # Read PDF file
+    """
+    Extract stock point data from PDF and convert to JSON format.
+    """
     print("Reading PDF file...")
-    dfs = tabula.read_pdf(pdf_file, pages="all", multiple_tables=True)  # Load all pages (multiple tables)
+    try:
+        dfs = tabula.read_pdf(pdf_file, pages="all", multiple_tables=True)
+    except Exception as e:
+        print(f"Error reading PDF with tabula: {e}")
+        return {"error": "Failed to read PDF with tabula"}
     
     print("PDF file read successfully.\n")
     main_row_val = "LOCATION/GRADE" if file_type == "ex_work_file" else "STOCKPOINT LOCATION"
@@ -107,64 +319,137 @@ def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:s
         print("Processing each table found in the PDF...\n")
         for table_index, df in enumerate(dfs):
             print(f"Processing Table {table_index + 1}:")
+            print(f"DataFrame shape: {df.shape}")
+            print(f"DataFrame columns: {df.columns.tolist()}")
+            print(f"First few rows:\n{df.head()}")
+            
+            if df.empty:
+                print(f"Table {table_index + 1} is empty, skipping...")
+                continue
 
             # Drop duplicates
             df = df.drop_duplicates()
             print("Dropped duplicate rows.")
 
-            # Extract data from DataFrame and store it in formatted_data
+            # Find the header row
             main_col = None
+            header_row_index = None
+            
             for row_index, row in df.iterrows():
-                if main_row_val in str(row.values[0:5]):
+                row_str = ' '.join([str(val) for val in row.values if str(val) != 'nan'])
+                print(f"Row {row_index}: {row_str[:100]}...")  # Debug print
+                if main_row_val in row_str:
                     main_col = row
+                    header_row_index = row_index
+                    print(f"Found header row at index {row_index}")
                     break
             
+            if main_col is None:
+                print(f"Header row with '{main_row_val}' not found in table {table_index + 1} using tabula, trying camelot...")
+                try:
+                    df_camelot = camelot.read_pdf(pdf_file, pages=f"{table_index+1}")[0].df
+                    print(f"Camelot DataFrame shape: {df_camelot.shape}")
+                    for row_index, row in df_camelot.iterrows():
+                        row_str = ' '.join([str(val) for val in row.values if str(val) != 'nan'])
+                        if main_row_val in row_str:
+                            main_col = row
+                            header_row_index = row_index
+                            df = df_camelot  # Use camelot dataframe
+                            print(f"Found header row at index {row_index} using camelot")
+                            break
+                except Exception as e:
+                    print(f"Error with camelot for table {table_index + 1}: {e}")
+                    continue
+            
+            if main_col is None:
+                print(f"Could not find header row in table {table_index + 1}, skipping...")
+                continue
+            
+            # Clean the header
+            cleaned_header = clean_header(main_col.values)
+            main_col = pd.Series(cleaned_header)
+            
+            print("Cleaned header: ", main_col.values.tolist())
+            
+            # Find the index of the main location column
             try:
-                main_col.values.tolist().index(main_row_val)
-            except ValueError as ve:
-                df = camelot.read_pdf(pdf_file, pages=f"{table_index+1}")[0].df
-                main_col = None
-                for row_index, row in df.iterrows():
-                    if main_row_val in str(row.values[0:5]):
-                        main_col = row
-                        break
+                main_col_index = main_col.values.tolist().index(main_row_val)
+            except ValueError:
+                print(f"Could not find '{main_row_val}' in cleaned header, skipping table {table_index + 1}")
+                continue
             
-            main_col = pd.Series(clean_header(main_col.values))
+            print(f"Main column '{main_row_val}' found at index: {main_col_index}")
             
-            print("main_row_val: ", main_col.values.tolist())
-            print("df: \n", df)
-            flag = False
-            for icol in range(main_col.values.tolist().index(main_row_val.strip()) + 1, len(main_col)):
-                print("main_row_val: ", main_row_val)
-                print("icol: ", main_col.values.tolist().index(main_row_val.strip()))
-                for row_index, row in df.iterrows():
-                    print("row: ", row.values, icol)
-                    if flag == False and main_row_val in str(row.values[0:5]):
-                        flag = True
-                        continue
-
-                    if flag:
-                        if main_col.values[icol].replace(' ', '') in formatted_data:
-                            formatted_data[main_col.values[icol].replace(' ', '')].append({
-                                "sap_code": row.values[1],
-                                main_key_val: row.values[2],
-                                "price": int(row.values[icol].replace(',', '').replace(' ', ''))
+            # Process data rows (skip header row)
+            data_start_row = header_row_index + 1 if header_row_index is not None else 0
+            
+            # Get the actual number of columns in the dataframe
+            num_cols = len(df.columns)
+            print(f"DataFrame has {num_cols} columns")
+            
+            for col_index in range(main_col_index + 1, min(len(main_col), num_cols)):
+                if col_index >= len(main_col.values):
+                    break
+                    
+                product_code = main_col.values[col_index]
+                if not product_code or str(product_code) == 'nan':
+                    continue
+                    
+                product_code_clean = str(product_code).replace(' ', '')
+                print(f"Processing product code: {product_code_clean}")
+                
+                for row_index in range(data_start_row, len(df)):
+                    try:
+                        row = df.iloc[row_index]
+                        
+                        # Check if we have enough columns for this row
+                        if len(row) <= max(1, 2, col_index):
+                            print(f"Row {row_index} doesn't have enough columns, skipping")
+                            continue
+                        
+                        # Safe access to columns
+                        sap_code_val = row.iloc[1] if len(row) > 1 else None
+                        location_val = row.iloc[2] if len(row) > 2 else None
+                        price_val = row.iloc[col_index] if len(row) > col_index else None
+                        
+                        # Skip if any essential data is missing or NaN
+                        if (pd.isna(sap_code_val) or pd.isna(location_val) or 
+                            pd.isna(price_val) or str(sap_code_val) == 'nan' or 
+                            str(location_val) == 'nan' or str(price_val) == 'nan'):
+                            continue
+                        
+                        sap_code = str(sap_code_val).strip()
+                        location = str(location_val).strip()
+                        price_str = str(price_val).replace(',', '').replace(' ', '')
+                        
+                        # Skip if any essential data is empty
+                        if not sap_code or not location or not price_str:
+                            continue
+                            
+                        price = int(float(price_str))
+                        
+                        if product_code_clean in formatted_data:
+                            formatted_data[product_code_clean].append({
+                                "sap_code": sap_code,
+                                main_key_val: location,
+                                "price": price
                             })
                         else:
-                            formatted_data[main_col.values[icol].replace(' ', '')] = [{
-                                "sap_code": row.values[1],
-                                main_key_val: row.values[2],
-                                "price": int(row.values[icol].replace(',', '').replace(' ', ''))
+                            formatted_data[product_code_clean] = [{
+                                "sap_code": sap_code,
+                                main_key_val: location,
+                                "price": price
                             }]
-                flag = False
-            
-            main_col = None
+                    except (ValueError, IndexError) as e:
+                        print(f"Error processing row {row_index}, col {col_index}: {e}")
+                        continue
     else:
         print("Error: PDF did not return a list of tables as expected.")
+        return {"error": "PDF processing failed"}
 
     # Print formatted data output for debugging
     print("\nFormatted data output:")    
-    pprint(len(formatted_data.keys()))
+    pprint(f"Found {len(formatted_data.keys())} product codes")
 
     # Transform formatted_data to desired output format
     output_json = {"data": []}
@@ -199,7 +484,7 @@ def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:s
 
     # Print final transformed data
     print("\nTransformed JSON data output:")
-    pprint(output_json)
+    pprint(f"Processed {len(output_json['data'])} locations")
 
     # Save JSON output if path is provided
     if save_json_path:
@@ -219,160 +504,97 @@ def extract_freight(file_path):
     Returns:
         dict: Dictionary mapping city names to their attributes.
     """
-    # Load the first sheet of the Excel file
-    data = pd.read_excel(file_path)
+    try:
+        # Load the first sheet of the Excel file
+        data = pd.read_excel(file_path)
 
-    # Rename columns for clarity
-    data.columns = [
-        "No", "CnTy", "Condition_Type", "PL_Number", "City", "Amount",
-        "Unit", "Per", "UoM", "Valid_From", "Valid_To"
-    ]
+        # Rename columns for clarity
+        data.columns = [
+            "No", "CnTy", "Condition_Type", "PL_Number", "City", "Amount",
+            "Unit", "Per", "UoM", "Valid_From", "Valid_To"
+        ]
 
-    # Drop the first row containing header-like information
-    data = data.iloc[1:].reset_index(drop=True)
+        # Drop the first row containing header-like information
+        data = data.iloc[1:].reset_index(drop=True)
 
-    # Remove rows where the "City" column or other relevant columns are empty
-    data = data.dropna(subset=["City", "Amount", "Unit", "Per", "UoM", "Valid_From", "Valid_To"]).reset_index(drop=True)
+        # Remove rows where the "City" column or other relevant columns are empty
+        data = data.dropna(subset=["City", "Amount", "Unit", "Per", "UoM", "Valid_From", "Valid_To"]).reset_index(drop=True)
 
-    # Create the dictionary mapping
-    city_mapping = {
-        row["City"]: {
-            "Amount": row["Amount"],
-            "Unit": row["Unit"],
-            "Per": row["Per"],
-            "UoM": row["UoM"],
-            "Valid_From": row["Valid_From"],
-            "Valid_To": row["Valid_To"],
+        # Create the dictionary mapping
+        city_mapping = {
+            row["City"]: {
+                "Amount": row["Amount"],
+                "Unit": row["Unit"],
+                "Per": row["Per"],
+                "UoM": row["UoM"],
+                "Valid_From": row["Valid_From"],
+                "Valid_To": row["Valid_To"],
+            }
+            for _, row in data.iterrows()
         }
-        for _, row in data.iterrows()
-    }
 
-    return city_mapping
-
+        return city_mapping
+    except Exception as e:
+        print(f"Error extracting freight data: {e}")
+        return {"error": f"Failed to extract freight data: {str(e)}"}
 
 
 def add_freight(same_month_records):
     """
-    "stock_point_file": "STOCK POINT FILE",
-    "freight_file": "FREIGHT FILE",
-    "ex_work_file": "EX WORK FILE"
+    Add freight data to stock point and ex-work records.
     """
-    stock_point_record = None
-    ex_work_record = None
-    freight_file_record = None
-    for record in same_month_records:
-        if record.file_type == 'stock_point_file':
-            stock_point_record = record
-        elif record.file_type == 'freight_file':
-            freight_file_record = record
-        elif record.file_type == 'ex_work_file':
-            ex_work_record = record
-    
-    """
-    freight:
-    {
-        "AGRA": {
-            "Amount": 928.72,
-            "Unit": "INR",
-            "Per": 1,
-            "UoM": "TO",
-            "Valid_From": "01.06.2022",
-            "Valid_To": "31.12.9999"
-        },
-        "AHMEDABAD": {
-            "Amount": 1737.32,
-            "Unit": "INR",
-            "Per": 1,
-            "UoM": "TO",
-            "Valid_From": "01.06.2022",
-            "Valid_To": "31.12.9999"
-        },...
-    }
-
-    stock_point:
-    {
-        "data": [
-            {
-                "id": 1,
-                "sap_code": "5102",
-                "location": "GAZIABAD/NOIDA",
-                "products": [
-                    {
-                        "product_code": "B52A003A",
-                        "price": 99650
-                    },
-                    {
-                        "product_code": "B55HM0003A",
-                        "price": 102000
-                    },
-                    {
-                        "product_code": "B56A003A",
-                        "price": 97150
-                    },
-                    { .... },
-                    ...
-                ]
-            }, ...
-        ]
-    }
-
-    ex work: 
-    {
-        "data": [
-            {
-                "id": 1,
-                "sap_code": "5102",
-                "location": "GAZIABAD/NOIDA",
-                "products": [
-                    {
-                        "product_code": "B52A003A",
-                        "price": 99650
-                    },
-                    {
-                        "product_code": "B55HM0003A",
-                        "price": 102000
-                    },
-                    {
-                        "product_code": "B56A003A",
-                        "price": 97150
-                    },
-                    { .... },
-                    ...
-                ]
-            }, ...
-        ]
-    }
-
-    """
-    
-    print("Add Freight ...")
-    done_flag_mem = {}
-
-    for i in range(len(stock_point_record.extracted_data['data'])):
-        location = stock_point_record.extracted_data['data'][i]['location']
-        for freight_loc, freight_record in freight_file_record.extracted_data.items():
-            if not done_flag_mem.get(location, False):
-                if location.strip().lower() == freight_loc.strip().lower():
-                    stock_point_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
-                    done_flag_mem[location] = True
-                elif word_similarity(location, freight_loc) >= 0.95:
-                    stock_point_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
-                    done_flag_mem[location] = True
-
-    done_flag_mem = {}
-
-    for i in range(len(ex_work_record.extracted_data['data'])):
-        location = ex_work_record.extracted_data['data'][i]['location']
-        for freight_loc, freight_record in freight_file_record.extracted_data.items():
-            if not done_flag_mem.get(location, False):
-                if location.strip().lower() == freight_loc.strip().lower():
-                    ex_work_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
-                    done_flag_mem[location] = True
-                elif word_similarity(location, freight_loc) >= 0.95:
-                    ex_work_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
-                    done_flag_mem[location] = True
-
-    stock_point_record.save(add_freight_flag = True)
-    ex_work_record.save(add_freight_flag = True)
-
+    try:
+        stock_point_record = None
+        ex_work_record = None
+        freight_file_record = None
+        
+        for record in same_month_records:
+            if record.file_type == 'stock_point_file':
+                stock_point_record = record
+            elif record.file_type == 'freight_file':
+                freight_file_record = record
+            elif record.file_type == 'ex_work_file':
+                ex_work_record = record
+        
+        if not freight_file_record:
+            print("No freight file found for freight calculation")
+            return
             
+        print("Add Freight ...")
+        
+        # Process stock point record
+        if stock_point_record and stock_point_record.extracted_data:
+            done_flag_mem = {}
+            for i in range(len(stock_point_record.extracted_data['data'])):
+                location = stock_point_record.extracted_data['data'][i]['location']
+                for freight_loc, freight_record in freight_file_record.extracted_data.items():
+                    if not done_flag_mem.get(location, False):
+                        if location.strip().lower() == freight_loc.strip().lower():
+                            stock_point_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
+                            done_flag_mem[location] = True
+                        elif word_similarity(location, freight_loc) >= 0.95:
+                            stock_point_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
+                            done_flag_mem[location] = True
+
+        # Process ex-work record
+        if ex_work_record and ex_work_record.extracted_data:
+            done_flag_mem = {}
+            for i in range(len(ex_work_record.extracted_data['data'])):
+                location = ex_work_record.extracted_data['data'][i]['location']
+                for freight_loc, freight_record in freight_file_record.extracted_data.items():
+                    if not done_flag_mem.get(location, False):
+                        if location.strip().lower() == freight_loc.strip().lower():
+                            ex_work_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
+                            done_flag_mem[location] = True
+                        elif word_similarity(location, freight_loc) >= 0.95:
+                            ex_work_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
+                            done_flag_mem[location] = True
+
+        # Save the updated records
+        if stock_point_record:
+            stock_point_record.save(add_freight_flag=True)
+        if ex_work_record:
+            ex_work_record.save(add_freight_flag=True)
+            
+    except Exception as e:
+        print(f"Error in add_freight: {e}")

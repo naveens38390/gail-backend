@@ -28,10 +28,13 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
-# Define the media root and URL
+# Media files configuration (uploaded files)
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')  # Store media files in a 'media' directory in your project root
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# Static files configuration
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # Application definition
 
 INSTALLED_APPS = [
@@ -158,7 +161,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
-STATIC_URL = 'static/'
+# STATIC_URL = 'static/'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -166,4 +169,4 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Static files moved here on collectstatic command
-STATIC_ROOT = "/var/www/gail-backend/static"
+# STATIC_ROOT = "/var/www/gail-backend/static"
