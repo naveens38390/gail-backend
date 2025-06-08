@@ -708,3 +708,142 @@ def search_cross_reference(request):
             'location': location
         }
     }, status=status.HTTP_200_OK)
+
+
+# Add this function to your views.py file (anywhere after the imports)
+
+@api_view(['GET'])
+def cross_reference_with_competitor_pricing(request):
+    """
+    Get competitor grades with their actual prices at specified location.
+    
+    Query parameters:
+    - location: Location name (required)
+    - gail_grade: GAIL product code (required) 
+    - file_source: 'stock_point' or 'ex_work' (optional, defaults to 'stock_point')
+    - competitor: Specific competitor (optional, returns all if not specified)
+    """
+    location = request.query_params.get('location')
+    gail_grade = request.query_params.get('gail_grade')
+    file_source = request.query_params.get('file_source', 'stock_point')
+    competitor_filter = request.query_params.get('competitor')
+    
+    if not all([location, gail_grade]):
+        return Response({
+            'error': 'location and gail_grade are required parameters'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Step 1: Get cross-reference data (GAIL grade → competitor grades)
+        cross_references = CrossReference.objects.filter(
+            gail_grade__iexact=gail_grade.strip(),
+            excel_upload__is_active=True
+        ).exclude(
+            competitor_grade__iexact='No equivalent'
+        ).exclude(
+            competitor_grade__isnull=True
+        ).exclude(
+            competitor_grade__exact=''
+        ).exclude(
+            competitor_grade__iexact='(blank)'
+        )
+        
+        if competitor_filter:
+            cross_references = cross_references.filter(competitor_name__iexact=competitor_filter.strip())
+        
+        if not cross_references.exists():
+            return Response({
+                'error': 'No cross-reference data found',
+                'message': f'No competitor grades found for GAIL grade {gail_grade}'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Step 2: Get pricing data from stock point or ex work files
+        file_type = 'stock_point_file' if file_source == 'stock_point' else 'ex_work_file'
+        
+        pricing_file = PDFUpload.objects.filter(
+            file_type=file_type,
+            extracted_data__isnull=False
+        ).order_by('-uploaded_at').first()
+        
+        if not pricing_file or 'error' in pricing_file.extracted_data:
+            return Response({
+                'error': f'No valid {file_source} pricing data found',
+                'suggestion': f'Please upload a valid {file_type} PDF first'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Step 3: Find location data
+        location_data = None
+        for item in pricing_file.extracted_data.get('data', []):
+            item_location = item.get('location') or item.get('location_grade', '')
+            if item_location.strip().lower() == location.strip().lower():
+                location_data = item
+                break
+        
+        if not location_data:
+            return Response({
+                'error': f'Location "{location}" not found in {file_source} data',
+                'available_locations': [
+                    item.get('location') or item.get('location_grade', '') 
+                    for item in pricing_file.extracted_data.get('data', [])
+                ]
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Step 4: Build response with competitor grades and their prices
+        competitors_with_pricing = []
+        
+        for ref in cross_references:
+            competitor_grade = ref.competitor_grade.strip()
+            
+            # Find the price of this competitor grade at the location
+            competitor_price = None
+            for product in location_data.get('products', []):
+                if product.get('product_code', '').strip().lower() == competitor_grade.lower():
+                    competitor_price = product.get('price')
+                    break
+            
+            competitor_info = {
+                'competitor_name': ref.competitor_name,
+                'competitor_grade': competitor_grade,
+                'competitor_price': competitor_price,
+                'competitor_price_formatted': f'₹{competitor_price:,}' if competitor_price else 'Price not available',
+                'price_available': competitor_price is not None,
+                'gail_grade': ref.gail_grade
+            }
+            
+            competitors_with_pricing.append(competitor_info)
+        
+        # Step 5: Summary statistics
+        available_prices = [comp for comp in competitors_with_pricing if comp['price_available']]
+        prices = [comp['competitor_price'] for comp in available_prices]
+        
+        summary = {
+            'location': location,
+            'gail_grade': gail_grade,
+            'file_source': file_source,
+            'total_competitors': len(competitors_with_pricing),
+            'competitors_with_prices': len(available_prices),
+            'competitors_without_prices': len(competitors_with_pricing) - len(available_prices),
+            'price_range': {
+                'min_price': min(prices) if prices else None,
+                'max_price': max(prices) if prices else None,
+                'avg_price': round(sum(prices) / len(prices)) if prices else None
+            } if prices else None
+        }
+        
+        response_data = {
+            'location': location,
+            'gail_grade': gail_grade,
+            'file_source': file_source,
+            'competitors': competitors_with_pricing,
+            'summary': summary,
+            'location_info': {
+                'sap_code': location_data.get('sap_code'),
+                'freight_amount': location_data.get('freight_amount'),
+                'total_products_at_location': len(location_data.get('products', []))
+            }
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

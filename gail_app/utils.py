@@ -154,18 +154,6 @@ def extract_cross_reference(file_path):
             print(f"❌ Not enough columns or empty DataFrame")
             return cross_reference_data
         
-        # Based on your actual Excel structure:
-        # Column 0: Polymer Type (HDPE, LLDPE, etc.)
-        # Column 1: GAIL Grade (B56A003A, I50A250, etc.) - THIS IS THE KEY
-        # Column 2: Application 
-        # Column 3: Characteristics
-        # Column 4: BCPL
-        # Column 5: RIL  
-        # Column 6: HPL
-        # Column 7: IOCL/IOC
-        # Column 8: OPAL/Opal
-        # Column 9: HMEL
-        # Column 10: Major Imported Grades
         
         gail_column = df.columns[1]  # "GAIL Grade" column
         competitor_columns = df.columns[4:11].tolist()  # Columns 4-10 are the competitors
@@ -295,18 +283,69 @@ def save_cross_reference_to_db(excel_upload_instance):
     CrossReference.objects.bulk_create(cross_references, batch_size=1000)
     print(f"Created {len(cross_references)} cross-reference entries in database.")
 
+# First install pdfplumber (no Java required)
+# pip install pdfplumber
 
-def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:str=None):
+def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type: str = None):
     """
-    Extract stock point data from PDF and convert to JSON format.
+    Extract stock point data from PDF using pure Python (no Java required).
     """
     print("Reading PDF file...")
-    try:
-        dfs = tabula.read_pdf(pdf_file, pages="all", multiple_tables=True)
-    except Exception as e:
-        print(f"Error reading PDF with tabula: {e}")
-        return {"error": "Failed to read PDF with tabula"}
     
+    try:
+        # Use pdfplumber (pure Python, no Java needed)
+        import pdfplumber
+        import pandas as pd
+        
+        print("Attempting PDF extraction with pdfplumber (no Java required)...")
+        
+        all_tables = []
+        with pdfplumber.open(pdf_file) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                print(f"Processing page {page_num + 1}...")
+                
+                # Extract tables from page
+                tables = page.extract_tables()
+                
+                for table_index, table in enumerate(tables):
+                    if table and len(table) > 1:  # Ensure table has data
+                        try:
+                            # Convert table to DataFrame
+                            # First row as header, rest as data
+                            headers = table[0] if table else []
+                            data_rows = table[1:] if len(table) > 1 else []
+                            
+                            if headers and data_rows:
+                                df = pd.DataFrame(data_rows, columns=headers)
+                                all_tables.append(df)
+                                print(f"Found table with {len(df)} rows on page {page_num + 1}")
+                        except Exception as e:
+                            print(f"Error processing table {table_index} on page {page_num + 1}: {e}")
+                            continue
+        
+        if not all_tables:
+            return {
+                "error": "No tables found in PDF",
+                "suggestion": "Please check if the PDF contains structured table data"
+            }
+        
+        dfs = all_tables
+        print(f"Successfully extracted {len(dfs)} tables using pdfplumber!")
+        
+    except ImportError:
+        return {
+            "error": "pdfplumber not installed",
+            "solution": "Run: pip install pdfplumber"
+        }
+    except Exception as e:
+        print(f"PDF extraction failed: {e}")
+        return {
+            "error": "PDF extraction failed",
+            "details": str(e),
+            "suggestion": "Please check if the PDF file is valid and contains table data"
+        }
+    
+    # REST OF YOUR ORIGINAL PROCESSING LOGIC STAYS THE SAME
     print("PDF file read successfully.\n")
     main_row_val = "LOCATION/GRADE" if file_type == "ex_work_file" else "STOCKPOINT LOCATION"
     main_key_val = "location_grade" if file_type == "ex_work_file" else "stockpoint_location"
@@ -336,30 +375,13 @@ def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:s
             header_row_index = None
             
             for row_index, row in df.iterrows():
-                row_str = ' '.join([str(val) for val in row.values if str(val) != 'nan'])
+                row_str = ' '.join([str(val) for val in row.values if str(val) != 'nan' and val is not None])
                 print(f"Row {row_index}: {row_str[:100]}...")  # Debug print
                 if main_row_val in row_str:
                     main_col = row
                     header_row_index = row_index
                     print(f"Found header row at index {row_index}")
                     break
-            
-            if main_col is None:
-                print(f"Header row with '{main_row_val}' not found in table {table_index + 1} using tabula, trying camelot...")
-                try:
-                    df_camelot = camelot.read_pdf(pdf_file, pages=f"{table_index+1}")[0].df
-                    print(f"Camelot DataFrame shape: {df_camelot.shape}")
-                    for row_index, row in df_camelot.iterrows():
-                        row_str = ' '.join([str(val) for val in row.values if str(val) != 'nan'])
-                        if main_row_val in row_str:
-                            main_col = row
-                            header_row_index = row_index
-                            df = df_camelot  # Use camelot dataframe
-                            print(f"Found header row at index {row_index} using camelot")
-                            break
-                except Exception as e:
-                    print(f"Error with camelot for table {table_index + 1}: {e}")
-                    continue
             
             if main_col is None:
                 print(f"Could not find header row in table {table_index + 1}, skipping...")
@@ -392,7 +414,7 @@ def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:s
                     break
                     
                 product_code = main_col.values[col_index]
-                if not product_code or str(product_code) == 'nan':
+                if not product_code or str(product_code) == 'nan' or product_code is None:
                     continue
                     
                 product_code_clean = str(product_code).replace(' ', '')
@@ -415,7 +437,8 @@ def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:s
                         # Skip if any essential data is missing or NaN
                         if (pd.isna(sap_code_val) or pd.isna(location_val) or 
                             pd.isna(price_val) or str(sap_code_val) == 'nan' or 
-                            str(location_val) == 'nan' or str(price_val) == 'nan'):
+                            str(location_val) == 'nan' or str(price_val) == 'nan' or
+                            sap_code_val is None or location_val is None or price_val is None):
                             continue
                         
                         sap_code = str(sap_code_val).strip()
@@ -479,7 +502,6 @@ def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:s
                     }]
                 }
 
-    # Convert location_data to the desired list format and assign it to the output
     output_json["data"] = list(location_data.values())
 
     # Print final transformed data
@@ -492,7 +514,6 @@ def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type:s
             json.dump(output_json, json_file, indent=4)
 
     return output_json
-
 
 def extract_freight(file_path):
     """

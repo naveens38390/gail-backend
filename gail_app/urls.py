@@ -27,4 +27,6 @@ urlpatterns = [
     path('companies-list/', views.get_companies_list, name='get_companies_list'),
     path('gail-grades-list/', views.get_gail_grades_list, name='get_gail_grades_list'),
     path('search-cross-reference/', views.search_cross_reference, name='search_cross_reference'),
+    # Add this line to your urlpatterns in urls.py:
+    path('cross-reference-with-competitor-pricing/', views.cross_reference_with_competitor_pricing, name='cross_reference_with_competitor_pricing'),
 ]
