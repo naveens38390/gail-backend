@@ -1,37 +1,3 @@
-# # from django.contrib import admin
-# # from .models import PDFUpload
-
-# # @admin.register(PDFUpload)
-# # class PDFUploadAdmin(admin.ModelAdmin):
-# #     list_display = ('id', 'file', 'file_type', 'month', 'year', 'uploaded_at')  # Display additional fields
-# #     search_fields = ('file', 'file_type', 'month', 'year')  # Allow searching by these fields
-
-
-# # gail_app/admin.py
-# from django.contrib import admin
-# from .models import PDFUpload
-
-# @admin.register(PDFUpload)
-# class PDFUploadAdmin(admin.ModelAdmin):
-#     list_display = ['id', 'file', 'file_type', 'month', 'year', 'uploaded_at', 'has_extracted_data']
-#     list_filter = ['file_type', 'month', 'year', 'uploaded_at']
-#     search_fields = ['file_type', 'month', 'year']
-#     readonly_fields = ['uploaded_at']
-    
-#     def has_extracted_data(self, obj):
-#         return bool(obj.extracted_data)
-#     has_extracted_data.boolean = True
-#     has_extracted_data.short_description = 'Data Extracted'
-    
-#     # Optional: Make extracted_data field read-only in admin to prevent accidental changes
-#     def get_readonly_fields(self, request, obj=None):
-#         if obj:  # editing an existing object
-#             return self.readonly_fields + ['extracted_data']
-#         return self.readonly_fields
-
-
-
-
 # gail_app/admin.py
 from django.contrib import admin
 from django.core.exceptions import ValidationError
