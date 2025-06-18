@@ -64,7 +64,10 @@ class PDFUpload(models.Model):
         if is_new and not add_freight_flag and update_fields != ['extracted_data']:
             same_month_year_files = PDFUpload.objects.filter(month=self.month, year=self.year)
             if same_month_year_files.count() >= 3:
-                add_freight(same_month_year_files)
+                # Only apply freight to ex_work files, not stock_point files
+                ex_work_files = same_month_year_files.filter(file_type='ex_work_file')
+                if ex_work_files.exists():
+                    add_freight(same_month_year_files)
 
     def __str__(self):
         return f"{self.file_type} - {self.month}/{self.year}"

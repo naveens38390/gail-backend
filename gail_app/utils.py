@@ -284,8 +284,6 @@ def save_cross_reference_to_db(excel_upload_instance):
     CrossReference.objects.bulk_create(cross_references, batch_size=1000)
     print(f"Created {len(cross_references)} cross-reference entries in database.")
 
-# First install pdfplumber (no Java required)
-# pip install pdfplumber
 
 def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type: str = None):
     """
@@ -515,111 +513,6 @@ def get_stock_json(pdf_file: str = None, save_json_path: str = None, file_type: 
             json.dump(output_json, json_file, indent=4)
 
     return output_json
-
-# def extract_freight(file_path):
-#     """
-#     Extract city-wise mapping from the first sheet of the provided Excel file.
-
-#     Args:
-#         file_path (str): Path to the Excel file.
-
-#     Returns:
-#         dict: Dictionary mapping city names to their attributes.
-#     """
-#     try:
-#         # Load the first sheet of the Excel file
-#         data = pd.read_excel(file_path)
-
-#         # Rename columns for clarity
-#         data.columns = [
-#             "No", "CnTy", "Condition_Type", "PL_Number", "City", "Amount",
-#             "Unit", "Per", "UoM", "Valid_From", "Valid_To"
-#         ]
-
-#         # Drop the first row containing header-like information
-#         data = data.iloc[1:].reset_index(drop=True)
-
-#         # Remove rows where the "City" column or other relevant columns are empty
-#         data = data.dropna(subset=["City", "Amount", "Unit", "Per", "UoM", "Valid_From", "Valid_To"]).reset_index(drop=True)
-
-#         # Create the dictionary mapping
-#         city_mapping = {
-#             row["City"]: {
-#                 "Amount": row["Amount"],
-#                 "Unit": row["Unit"],
-#                 "Per": row["Per"],
-#                 "UoM": row["UoM"],
-#                 "Valid_From": row["Valid_From"],
-#                 "Valid_To": row["Valid_To"],
-#             }
-#             for _, row in data.iterrows()
-#         }
-
-#         return city_mapping
-#     except Exception as e:
-#         print(f"Error extracting freight data: {e}")
-#         return {"error": f"Failed to extract freight data: {str(e)}"}
-
-
-# def add_freight(same_month_records):
-#     """
-#     Add freight data to stock point and ex-work records.
-#     """
-#     try:
-#         stock_point_record = None
-#         ex_work_record = None
-#         freight_file_record = None
-        
-#         for record in same_month_records:
-#             if record.file_type == 'stock_point_file':
-#                 stock_point_record = record
-#             elif record.file_type == 'freight_file':
-#                 freight_file_record = record
-#             elif record.file_type == 'ex_work_file':
-#                 ex_work_record = record
-        
-#         if not freight_file_record:
-#             print("No freight file found for freight calculation")
-#             return
-            
-#         print("Add Freight ...")
-        
-#         # Process stock point record
-#         if stock_point_record and stock_point_record.extracted_data:
-#             done_flag_mem = {}
-#             for i in range(len(stock_point_record.extracted_data['data'])):
-#                 location = stock_point_record.extracted_data['data'][i]['location']
-#                 for freight_loc, freight_record in freight_file_record.extracted_data.items():
-#                     if not done_flag_mem.get(location, False):
-#                         if location.strip().lower() == freight_loc.strip().lower():
-#                             stock_point_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
-#                             done_flag_mem[location] = True
-#                         elif word_similarity(location, freight_loc) >= 0.95:
-#                             stock_point_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
-#                             done_flag_mem[location] = True
-
-#         # Process ex-work record
-#         if ex_work_record and ex_work_record.extracted_data:
-#             done_flag_mem = {}
-#             for i in range(len(ex_work_record.extracted_data['data'])):
-#                 location = ex_work_record.extracted_data['data'][i]['location']
-#                 for freight_loc, freight_record in freight_file_record.extracted_data.items():
-#                     if not done_flag_mem.get(location, False):
-#                         if location.strip().lower() == freight_loc.strip().lower():
-#                             ex_work_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
-#                             done_flag_mem[location] = True
-#                         elif word_similarity(location, freight_loc) >= 0.95:
-#                             ex_work_record.extracted_data['data'][i]['freight_amount'] = freight_record['Amount']
-#                             done_flag_mem[location] = True
-
-#         # Save the updated records
-#         if stock_point_record:
-#             stock_point_record.save(add_freight_flag=True)
-#         if ex_work_record:
-#             ex_work_record.save(add_freight_flag=True)
-            
-#     except Exception as e:
-#         print(f"Error in add_freight: {e}")
 
 
 def extract_freight(file_path):
@@ -865,35 +758,9 @@ def add_freight(same_month_records):
             return
         
         # Process stock point record
-        if stock_point_record and stock_point_record.extracted_data:
-            matched_count = 0
-            total_locations = len(stock_point_record.extracted_data['data'])
-            
-            for i, location_item in enumerate(stock_point_record.extracted_data['data']):
-                location = location_item.get('location', '')
-                
-                if not location:
-                    continue
-                
-                # Use enhanced matching
-                freight_match = enhanced_freight_matching(location, freight_data)
-                
-                if freight_match:
-                    stock_point_record.extracted_data['data'][i]['freight_amount'] = freight_match['Amount']
-                    stock_point_record.extracted_data['data'][i]['freight_details'] = {
-                        'amount': freight_match['Amount'],
-                        'distance_km': freight_match.get('Distance_KM', 0),
-                        'transit_days': freight_match.get('Transit_Days', 0),
-                        'state': freight_match.get('State', ''),
-                        'unit': freight_match.get('Unit', 'MT')
-                    }
-                    matched_count += 1
-                    print(f"✅ Stock point freight match: {location} -> ₹{freight_match['Amount']}/MT")
-                else:
-                    print(f"❌ No freight match for stock point location: {location}")
-            
-            print(f"Stock point freight matching: {matched_count}/{total_locations} locations matched")
-
+        # Skip stock point record - freight not applicable
+        if stock_point_record:
+            print("⚠️ Skipping freight application for stock point file (not applicable)")
         # Process ex-work record
         if ex_work_record and ex_work_record.extracted_data:
             matched_count = 0
