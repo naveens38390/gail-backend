@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure--$$z!@f9(+8)^&z@usxj9!y@d1&076ne(!g=&#6a7vw2+jbjvr
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ["Gail.onrender.com"]
 
 # Media files configuration (uploaded files)
 MEDIA_URL = '/media/'
@@ -170,3 +170,4 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Static files moved here on collectstatic command
 # STATIC_ROOT = "/var/www/gail-backend/static"
+MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
