@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure--$$z!@f9(+8)^&z@usxj9!y@d1&076ne(!g=&#6a7vw2+jbjvr
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["Gail.onrender.com"]
+ALLOWED_HOSTS = ["gail-wqii.onrender.com"]
 
 # Media files configuration (uploaded files)
 MEDIA_URL = '/media/'
